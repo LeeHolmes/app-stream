@@ -1,0 +1,19 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Build App Stream (release)",
+			"type": "shell",
+			"command": "${env:USERPROFILE}\\.cargo\\bin\\cargo.exe",
+			"args": [
+				"build",
+				"--release"
+			],
+			"isBackground": false,
+			"problemMatcher": [
+				"$rustc"
+			],
+			"group": "build"
+		}
+	]
+}

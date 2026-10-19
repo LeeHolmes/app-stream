@@ -1,8 +1,9 @@
 # App Stream
 
-A Windows Rust command-line application that captures a process's main window
+A Windows Rust GUI application that captures a process's main window
 and publishes H.264 video through an authenticated, localhost-only RTSP server.
-Each invocation streams one window at `rtsp://127.0.0.1:PORT/app`.
+Each instance streams one window at `rtsp://127.0.0.1:PORT/app`. App Stream and
+its FFmpeg encoder run without console windows.
 
 ## Requirements
 
@@ -21,10 +22,37 @@ cargo build --release
 .\target\release\app-stream.exe --process notepad.exe --port 8554 --username viewer
 ```
 
-On first launch for a username, enter the password at the hidden prompt. App
+You can also double-click the executable: it uses username `viewer`, port `8554`,
+and the visual window picker. Command-line options remain available for custom
+settings and process/PID selection. Help and argument errors appear in dialogs.
+
+On first launch for a username, enter the password in the masked GUI dialog. App
 Stream saves it in **Windows Credential Manager** and reuses it on later launches
-without prompting. The stream becomes available after the application prints
-`Ready`.
+without prompting. The stream becomes available when the log reports `Ready`,
+and the app hides in the system tray.
+
+### System tray and client log
+
+Right-click the App Stream tray icon to:
+
+- **Change target**: select a different window using the red-outline picker.
+  This restarts capture and the RTSP listener on the same port; existing viewers
+  are disconnected and must reconnect. Pressing Esc keeps the previous target
+  (and restarts its stream), if one was selected.
+- **Connected client log**: open the live log, including authenticated client
+  usernames, IP addresses/source ports, connection/disconnection events, and
+  capture, FFmpeg, and server errors. A single left-click on the tray icon opens
+  the log too (double-click also works).
+- **Exit**: stop the listener, disconnect viewers, terminate/reap FFmpeg,
+  remove the tray icon, and exit.
+
+The log window's **Close** button and title-bar **X** both hide it to the tray;
+neither stops streaming. To quit, right-click the tray icon and choose **Exit**. Startup
+or capture failures show the log window rather than disappearing silently. Use
+**Change target** to retry or the tray's **Exit** to quit. Cancelling the initial picker
+also leaves the app available for retry. The log holds the latest 1,000 lines
+in memory, with UTC times, and is not written to disk. Diagnostics never contain
+passwords or authorization headers.
 
 ### Saved passwords
 
@@ -34,7 +62,7 @@ Different RTSP usernames have separate entries; different ports and processes
 using the same username share that username's saved password.
 
 App Stream reads the saved password for `--username`. If none is saved, it uses a
-hidden prompt and saves the new password for future launches. Passwords cannot
+masked GUI dialog and saves the new password for future launches. Passwords cannot
 be supplied through command-line parameters or environment variables.
 
 To delete a saved password and exit without selecting/capturing a window:
@@ -59,7 +87,7 @@ After entering the password, move the mouse over a window. A thin red border
 follows the window under the pointer. Left-click to select that exact window
 (even if its process has other, larger windows). The selection click is consumed,
 so it does not activate a button or other control in the target. The border
-disappears before streaming starts. Press **Esc** or **Ctrl+C** to cancel.
+disappears before streaming starts. Press **Esc** to cancel.
 Desktop backgrounds, taskbars, and tool windows are not selectable. The outline
 supports multiple monitors, including monitors with negative screen coordinates.
 
@@ -95,7 +123,7 @@ VLC's interactive prompt for normal use.
 | `--process NAME` | Optional executable name, case-insensitive; `.exe` is optional |
 | `--pid PID` | Select a process by PID; if `--process` is also supplied, both must match |
 | `--port PORT` | Local IPv4 TCP port, default `8554` |
-| `--username NAME` | Required viewer username |
+| `--username NAME` | Viewer username, default `viewer` |
 | `--delete-password` | Delete saved password for `--username` and exit; alias `--delete-keys` |
 | `--legacy-digest` | Opt-in Digest compatibility for older camera clients without `qop`/nonce counters |
 | `--fps N` | Capture rate, 1-60, default `30` |
@@ -123,7 +151,7 @@ again after the last viewer tears down, disconnects, times out, or is dropped as
 too slow. Reconnecting viewers wait for the next keyframe; buffered frames from
 before the idle period are not sent as the new first frame.
 
-Idle, resume, and window-resize transitions are silent. The console logs each
+Idle, resume, and window-resize transitions are silent. The tray's client log records each
 successfully authenticated connection once, including the username and client IP
 address (for example, `RTSP client connected: username="viewer", IP=127.0.0.1`).
 No additional options are needed, and authentication and the localhost-only
@@ -154,14 +182,15 @@ listener remain available while idle.
   viewers that disconnect can reconnect normally. No pause/resume status messages
   are printed.
 - The target must be restored when initially selected. Closing/destroying the
-  captured window still stops the application with an explicit error.
+  captured window stops the stream and opens the log with an explicit error;
+  the tray remains available to select a new target or exit.
 - Some GPU-rendered, browser, game, protected-video, and elevated windows do not
   support `PrintWindow` and can return black, stale, or incomplete content even
   when Windows reports success. This backend cannot detect all such cases.
   Windows Graphics Capture/Desktop Duplication is not implemented.
 - Do not run elevated unless necessary. Use the same desktop/session and
   compatible privilege level as the target. `PrintWindow` is synchronous, so an
-  unresponsive target can stall capture; Ctrl+C still stops the server and
+  unresponsive target can stall capture; the tray's **Exit** still stops the server and
   terminates the encoder.
 - The configured FPS is a target, not a guarantee; large/slow windows may encode
   more slowly. Encoding is software-based (`libx264`, ultrafast/zerolatency).
@@ -185,9 +214,10 @@ exchanges can be subject to offline password guessing. Use a strong password.
 Localhost is not a security boundary against privileged local software.
 Do not proxy or forward this port to an untrusted network.
 
-Ctrl+C shuts down the listener, disconnects viewers, and terminates/reaps FFmpeg.
-Capture/encoder failures stop the application with a nonzero exit code and
-diagnostic output.
+The tray's **Exit** command shuts down the listener, disconnects viewers, and
+terminates/reaps FFmpeg. Capture/encoder failures stop streaming and show the
+diagnostic log, with the tray available to retry. Credential-store and other
+fatal startup errors appear in an error dialog.
 
 ### Camera clients / Blue Iris troubleshooting
 
@@ -207,7 +237,7 @@ For Blue Iris or another camera viewer, configure:
   UDP and RTSP-over-HTTP tunneling are not supported.
 
 Some older RTSP camera clients use legacy Digest authentication without
-`qop=auth`. If the console reports that mismatch, restart App Stream with:
+`qop=auth`. If the client log reports that mismatch, restart App Stream with:
 
 ```powershell
 .\target\release\app-stream.exe --port 8554 --username viewer --legacy-digest
@@ -231,6 +261,28 @@ into shared logs or screenshots.
 
 ## Validation
 
+### Icon assets
+
+The supplied screenshot is preserved in [assets/icon-source.png](assets/icon-source.png).
+The generator removes its gray backdrop and unmattes the antialiased blue edges;
+[assets/icon-transparent.png](assets/icon-transparent.png) is the transparent master.
+The generated
+[Windows icon](assets/app-stream.ico) contains 16, 20, 24, 32, 40, 48, 64, 96,
+128, and 256 pixel images. Matching PNGs are in [assets](assets); the executable,
+application windows, and notification area use the embedded icon. Regenerate the
+set on Windows with:
+
+```powershell
+.\tools\Generate-Icons.ps1
+```
+
+The application and password windows use normal Windows title bars with the app
+icon, Windows Common Controls v6 visual styles, and the current system UI font
+scaled for the monitor's DPI. App Stream's own windows are excluded from the
+picker by their window class, rather than using icon-less tool-window frames.
+
+### Tests
+
 ```powershell
 cargo fmt -- --check
 cargo clippy --all-targets -- -D warnings
@@ -251,6 +303,8 @@ Desktop integration tests create their own windows to verify BGRA capture,
 automatic resize scaling, recovery from minimization/hiding, errors on destruction,
 red hover outlines, exact-window
 selection, click consumption, PID-only capture, and selector cleanup/cancellation.
+GUI tests verify tray lifecycle, normal title-bar icons, activated Windows visual
+styles, and DPI-scaled system fonts in both the password and client-log windows.
 An additional FFmpeg/desktop integration test verifies that idle capture produces
 zero frames and that two successive viewer connections wake capture and decode
 video successfully across resizes, minimization, and temporary hiding, both while

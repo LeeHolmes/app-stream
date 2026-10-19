@@ -51,12 +51,9 @@ struct State {
     error: Option<anyhow::Error>,
 }
 
-pub async fn select() -> Result<Option<SelectedWindow>> {
-    let cancelled = Arc::new(AtomicBool::new(false));
+pub async fn select(cancelled: Arc<AtomicBool>) -> Result<Option<SelectedWindow>> {
     let worker_cancelled = cancelled.clone();
-    eprintln!(
-        "Select a window: move the mouse to highlight it, then left-click. Esc or Ctrl+C cancels."
-    );
+    eprintln!("Select a window: move the mouse to highlight it, then left-click. Esc cancels.");
     let mut worker = tokio::task::spawn_blocking(move || select_blocking(worker_cancelled));
     tokio::select! {
         result = &mut worker => result.context("Window selector task failed")?,
@@ -270,10 +267,7 @@ fn window_at(point: POINT, overlay: HWND) -> Option<SelectedWindow> {
     let mut class = [0u16; 256];
     let length = unsafe { GetClassNameW(hwnd, class.as_mut_ptr(), class.len() as i32) };
     let class = String::from_utf16_lossy(&class[..length.max(0) as usize]);
-    if matches!(
-        class.as_str(),
-        "Progman" | "WorkerW" | "Shell_TrayWnd" | "Shell_SecondaryTrayWnd"
-    ) {
+    if excluded_class(&class) {
         return None;
     }
     let mut rect: RECT = unsafe { zeroed() };
@@ -289,6 +283,14 @@ fn window_at(point: POINT, overlay: HWND) -> Option<SelectedWindow> {
         handle: hwnd as usize,
         pid,
     })
+}
+
+fn excluded_class(class: &str) -> bool {
+    class.starts_with("AppStream.")
+        || matches!(
+            class,
+            "Progman" | "WorkerW" | "Shell_TrayWnd" | "Shell_SecondaryTrayWnd"
+        )
 }
 
 unsafe extern "system" fn mouse_hook(code: i32, message: WPARAM, data: LPARAM) -> LRESULT {
@@ -375,6 +377,14 @@ fn same_rect(first: Option<RECT>, second: Option<RECT>) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn normal_app_stream_windows_are_not_capture_targets() {
+        assert!(excluded_class("AppStream.LogWindow"));
+        assert!(excluded_class("AppStream.PasswordWindow"));
+        assert!(!excluded_class("Notepad"));
+        assert!(!excluded_class("BUTTON"));
+    }
 
     #[test]
     fn outline_comparison_detects_moves_resizes_and_disappearance() {

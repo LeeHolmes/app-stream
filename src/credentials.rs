@@ -6,10 +6,7 @@ const SERVICE: &str = "App Stream";
 pub fn load_or_prompt(username: &str) -> Result<String> {
     let entry =
         Entry::new(SERVICE, username).context("Opening Windows Credential Manager entry")?;
-    let password = resolve(&entry, || {
-        rpassword::prompt_password("RTSP password (saved in Windows Credential Manager): ")
-            .context("Reading RTSP password")
-    })?;
+    let password = resolve(&entry, || crate::gui::password_prompt(username))?;
     Ok(password)
 }
 

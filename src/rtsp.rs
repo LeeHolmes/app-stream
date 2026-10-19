@@ -366,7 +366,8 @@ fn transport(value: &str) -> Option<(u8, u8)> {
 async fn client(socket: TcpStream, mut media: Media, credentials: Arc<Credentials>) -> Result<()> {
     socket.set_nodelay(true)?;
     let port = socket.local_addr()?.port();
-    let peer_ip = socket.peer_addr()?.ip();
+    let peer = socket.peer_addr()?;
+    let peer_ip = peer.ip();
     let (read, mut writer) = socket.into_split();
     let mut reader = BufReader::new(read);
     let (requests_tx, mut requests) = mpsc::channel(4);
@@ -386,7 +387,7 @@ async fn client(socket: TcpStream, mut media: Media, credentials: Arc<Credential
         }
     }));
     let mut auth = Authentication::new();
-    let mut connection_logged = false;
+    let mut connection_log = None;
     let session = format!("{:016x}", rand::random::<u64>());
     let ssrc = rand::random::<u32>();
     let mut sequence = rand::random::<u16>();
@@ -411,9 +412,12 @@ async fn client(socket: TcpStream, mut media: Media, credentials: Arc<Credential
                     respond(&mut writer, &request, "401 Unauthorized", &challenge, "").await?;
                     continue;
                 }
-                if !connection_logged {
-                    eprintln!("RTSP client connected: username={:?}, IP={peer_ip}", credentials.username);
-                    connection_logged = true;
+                if connection_log.is_none() {
+                    eprintln!("RTSP client connected: username={:?}, IP={peer_ip}, client={peer}", credentials.username);
+                    connection_log = Some(ConnectionLog {
+                        username: credentials.username.clone(),
+                        peer,
+                    });
                 }
                 let track = resource(&request.uri, port);
                 if request.uri != "*" && track.is_none() {
@@ -506,6 +510,20 @@ async fn client(socket: TcpStream, mut media: Media, credentials: Arc<Credential
 }
 
 struct AbortOnDrop(tokio::task::JoinHandle<()>);
+
+struct ConnectionLog {
+    username: String,
+    peer: std::net::SocketAddr,
+}
+
+impl Drop for ConnectionLog {
+    fn drop(&mut self) {
+        eprintln!(
+            "RTSP client disconnected: username={:?}, client={}",
+            self.username, self.peer
+        );
+    }
+}
 
 impl Drop for AbortOnDrop {
     fn drop(&mut self) {

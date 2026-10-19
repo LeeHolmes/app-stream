@@ -1,5 +1,6 @@
 use std::{
-    io::Write,
+    io::{BufRead, BufReader, Write},
+    os::windows::process::CommandExt,
     process::{Child, Command, Stdio},
     sync::{
         Arc, Mutex,
@@ -87,6 +88,7 @@ impl Pipeline {
                 eprintln!("Capturing {}", capture.description());
                 let dimensions = format!("{}x{}", capture.width(), capture.height());
                 let mut encoder = Command::new(&executable)
+                    .creation_flags(0x08000000) // CREATE_NO_WINDOW: FFmpeg must not open a console.
                     .args([
                         "-hide_banner", "-loglevel", "warning", "-nostdin",
                         "-f", "rawvideo", "-pixel_format", "bgra",
@@ -101,11 +103,23 @@ impl Pipeline {
                     ])
                     .stdin(Stdio::piped())
                     .stdout(Stdio::piped())
-                    .stderr(Stdio::inherit())
+                    .stderr(Stdio::piped())
                     .spawn()
                     .with_context(|| format!("Starting FFmpeg at {executable:?}; install an FFmpeg build with libx264 or set --ffmpeg"))?;
                 let mut input = encoder.stdin.take().context("Missing FFmpeg stdin")?;
                 let output = encoder.stdout.take().context("Missing FFmpeg stdout")?;
+                let errors = encoder.stderr.take().context("Missing FFmpeg stderr")?;
+                thread::spawn(move || {
+                    for line in BufReader::new(errors).lines() {
+                        match line {
+                            Ok(line) => eprintln!("FFmpeg: {line}"),
+                            Err(error) => {
+                                eprintln!("Reading FFmpeg diagnostics failed: {error}");
+                                break;
+                            }
+                        }
+                    }
+                });
                 // Hold the lock only for process ownership, never across pipe I/O.
                 {
                     let mut slot = child.lock().expect("Encoder mutex poisoned");
